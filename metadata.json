@@ -1,0 +1,6 @@
+{
+  "name": "Planilla Preoperacional Móvil",
+  "description": "Interfaz móvil de pantalla completa optimizada para el registro solar de identificación de operadores preoperacionales y vehículos en patios de Cartagena.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
