@@ -11,7 +11,9 @@ import GestionMantenimiento from './components/GestionMantenimiento';
 import ReporteMensualKilometraje from './components/ReporteMensualKilometraje';
 import ControlDocumentacion from './components/ControlDocumentacion';
 import ReportesKilometraje from './components/ReportesKilometraje';
+import VistaAuxiliarVial from './components/VistaAuxiliarVial';
 import { supabase } from './lib/apiClients';
+import { purgeInvalidAuthTokens, isRefreshTokenError } from './lib/authErrorHandler';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
 import IdleTimer from './components/IdleTimer';
 
@@ -24,43 +26,18 @@ function AppContent() {
   useEffect(() => {
     // Catch and handle unhandled promise rejections (like Supabase Auth token failures)
     const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
-      const reason = event.reason;
-      if (reason) {
-        const errorMsg = String(reason.message || reason).toLowerCase();
-        if (
-          errorMsg.includes('refresh_token') ||
-          errorMsg.includes('refresh token') ||
-          errorMsg.includes('not found')
-        ) {
-          console.warn('[Session] Suppressed unhandled refresh token rejection, clearing local tokens...');
-          for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (key && (key.startsWith('sb-') || key.includes('-auth-token'))) {
-              localStorage.removeItem(key);
-              i--;
-            }
-          }
-          event.preventDefault();
-        }
+      if (isRefreshTokenError(event.reason)) {
+        console.warn('[Session] Suppressed unhandled refresh token rejection, clearing local tokens...');
+        purgeInvalidAuthTokens();
+        event.preventDefault();
       }
     };
 
     // Catch and handle standard error events
     const handleError = (event: ErrorEvent) => {
-      const errorMsg = String(event.message || '').toLowerCase();
-      if (
-        errorMsg.includes('refresh_token') ||
-        errorMsg.includes('refresh token') ||
-        errorMsg.includes('not found')
-      ) {
+      if (isRefreshTokenError(event.error) || isRefreshTokenError(event.message)) {
         console.warn('[Session] Suppressed refresh token error, clearing local tokens...');
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i);
-          if (key && (key.startsWith('sb-') || key.includes('-auth-token'))) {
-            localStorage.removeItem(key);
-            i--;
-          }
-        }
+        purgeInvalidAuthTokens();
         event.preventDefault();
       }
     };
@@ -85,25 +62,9 @@ function AppContent() {
         const { data: { session: sbSession }, error: sbError } = await supabase.auth.getSession();
         
         if (sbError) {
-          console.error('Supabase native session recovery error:', sbError);
-          const errorMsg = sbError.message?.toLowerCase() || '';
-          if (
-            errorMsg.includes('refresh_token') ||
-            errorMsg.includes('refresh token') ||
-            errorMsg.includes('not found') ||
-            sbError.status === 400 ||
-            sbError.status === 401
-          ) {
-            console.warn('Invalid refresh token detected. Cleaning up local token cache...');
-            
-            // Purge manually (do not call supabase.auth.signOut() as that attempts a network request with the invalid token and fails)
-            for (let i = 0; i < localStorage.length; i++) {
-              const key = localStorage.key(i);
-              if (key && (key.startsWith('sb-') || key.includes('-auth-token'))) {
-                localStorage.removeItem(key);
-                i--;
-              }
-            }
+          if (isRefreshTokenError(sbError) || sbError.status === 400 || sbError.status === 401) {
+            console.warn('[Session Recovery] Invalid or expired refresh token detected. Purging token cache...');
+            purgeInvalidAuthTokens();
 
             // If the saved session belonged to an administrator, log out of it
             if (saved) {
@@ -115,10 +76,17 @@ function AppContent() {
                 }
               } catch (e) {}
             }
+          } else {
+            console.warn('Supabase native session recovery notice:', sbError.message);
           }
         }
       } catch (err) {
-        console.error('Unhandled app-level native session check error:', err);
+        if (isRefreshTokenError(err)) {
+          console.warn('[Session Recovery] Handled token refresh failure, clearing tokens.');
+          purgeInvalidAuthTokens();
+        } else {
+          console.warn('App-level session check warning:', err);
+        }
       } finally {
         setLoading(false);
       }
@@ -129,14 +97,7 @@ function AppContent() {
     // Listen to token refresh failures dynamically
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, currentSession) => {
       if (event === 'SIGNED_OUT') {
-        // Purge stored token memory
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i);
-          if (key && (key.startsWith('sb-') || key.includes('-auth-token'))) {
-            localStorage.removeItem(key);
-            i--;
-          }
-        }
+        purgeInvalidAuthTokens();
       }
     });
 
@@ -191,6 +152,8 @@ function AppContent() {
                 <Navigate to="/dashboard-regulador" replace />
               ) : (session.type === 'operator' || session.user?.rol === 'operador') ? (
                 <Navigate to="/planilla" replace />
+              ) : (session.type === 'auxiliar_vial' || session.user?.rol === 'auxiliar vial' || session.user?.rol === 'auxiliar_vial') ? (
+                <Navigate to="/auxiliar-vial" replace />
               ) : session.type === 'admin' ? (
                 <Navigate to="/admin" replace />
               ) : (
@@ -259,6 +222,21 @@ function AppContent() {
                 />
               ) : (
                 <Navigate to="/" replace />
+              )
+            } 
+          />
+
+          {/* /auxiliar-vial */}
+          <Route 
+            path="/auxiliar-vial" 
+            element={
+              !session ? (
+                <Navigate to="/login" replace />
+              ) : (
+                <VistaAuxiliarVial 
+                  session={session}
+                  onLogout={handleLogout}
+                />
               )
             } 
           />

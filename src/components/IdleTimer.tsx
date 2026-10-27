@@ -20,10 +20,14 @@ export default function IdleTimer({ children, onLogout, isActive, userRole }: Id
       sessionStorage.clear();
 
       if (supabase && supabase.auth) {
-        await supabase.auth.signOut();
+        try {
+          await supabase.auth.signOut();
+        } catch (signOutErr) {
+          console.warn('Supabase auth signOut silent notice:', signOutErr);
+        }
       }
     } catch (e) {
-      console.error('Error signing out from Supabase:', e);
+      console.warn('Silent signout notice in IdleTimer:', e);
     }
     
     // Clear all localStorage as requested

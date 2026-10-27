@@ -598,24 +598,6 @@ export default function SidebarAdmin({ onLogout, adminSession, initialTab, initi
             <button
               type="button"
               onClick={() => {
-                setPestañaActiva('autorizaciones');
-              }}
-              title="Autorizaciones Viales"
-              className={`w-full flex items-center ${isCollapsed ? 'justify-center px-0' : 'gap-3 px-3'} py-2.5 rounded-xl text-xs font-bold uppercase tracking-wide transition-all cursor-pointer ${
-                pestañaActiva === 'autorizaciones'
-                  ? isLight
-                    ? 'bg-blue-50 text-blue-600 border border-blue-105'
-                    : 'bg-zinc-900 text-emerald-400 border border-zinc-800'
-                  : 'hover:bg-slate-100 dark:hover:bg-zinc-900/60'
-              }`}
-            >
-              <ClipboardCheck className="w-4 h-4 shrink-0" />
-              {!isCollapsed && <span className="truncate">Autorizaciones Viales</span>}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
                 setPestañaActiva('contingencia');
               }}
               title="Autorizaciones de Contingencia"

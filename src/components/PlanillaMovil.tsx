@@ -254,10 +254,14 @@ export default function PlanillaMovil({ supabaseClient, operatorSession, onLogou
       sessionStorage.clear();
       // 2. Ejecutar el cierre de sesión de Supabase
       if (supabase && supabase.auth) {
-        await supabase.auth.signOut();
+        try {
+          await supabase.auth.signOut();
+        } catch (signOutErr) {
+          console.warn('Supabase auth signOut silent notice:', signOutErr);
+        }
       }
     } catch (e) {
-      console.error('Error cerrando sesión:', e);
+      console.warn('Error cerrando sesión (silencioso):', e);
     }
     // 3. Redirigir al usuario a la pantalla de Login
     if (onLogout) {

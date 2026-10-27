@@ -1,3 +1,4 @@
+import './authErrorHandler';
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || localStorage.getItem('supabase_url') || '';
@@ -6,7 +7,14 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || localStorage.g
 // Create a globally accessible lazy loading or direct initialized Supabase client
 export const supabase = createClient(
   supabaseUrl || 'https://placeholder-url.supabase.co', 
-  supabaseAnonKey || 'placeholder-key'
+  supabaseAnonKey || 'placeholder-key',
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+    }
+  }
 );
 
 export function getSupabaseClient() {

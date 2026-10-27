@@ -455,6 +455,27 @@ export async function generarPreoperacionalPDF(page1Element: HTMLElement, page2E
       page2Element ? waitForAllImages(page2Element) : Promise.resolve()
     ]);
 
+    // Detección de dispositivo móvil para escala dinámica
+    const isMobile = typeof window !== 'undefined' ? window.innerWidth < 768 : false;
+    const dynamicScale = isMobile ? 1 : 2;
+
+    // Pausa para dar tiempo al procesador móvil de pintar el DOM
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // Salvar estilos originales de page1
+    const originalWidth1 = page1Element.style.width;
+    const originalMaxWidth1 = page1Element.style.maxWidth;
+    page1Element.style.width = '1024px';
+    page1Element.style.maxWidth = '1024px';
+
+    // Salvar estilos originales de page2 si existe
+    const originalWidth2 = page2Element ? page2Element.style.width : '';
+    const originalMaxWidth2 = page2Element ? page2Element.style.maxWidth : '';
+    if (page2Element) {
+      page2Element.style.width = '1024px';
+      page2Element.style.maxWidth = '1024px';
+    }
+
     const pdf = new jsPDF({
       orientation: 'portrait',
       unit: 'mm',
@@ -462,27 +483,39 @@ export async function generarPreoperacionalPDF(page1Element: HTMLElement, page2E
     });
 
     const canvasOptions = {
-      scale: 2,
+      scale: dynamicScale,
       useCORS: true,
       allowTaint: true,
       logging: false,
+      windowWidth: 1024,
+      width: 1024,
       backgroundColor: '#ffffff',
       onclone: (clonedDoc: Document) => {
         sanitizeClonedDocument(clonedDoc);
       }
     };
 
-    // Render Page 1
-    const canvas1 = await html2canvas(page1Element, canvasOptions);
-    const imgData1 = canvas1.toDataURL('image/jpeg', 0.95);
-    pdf.addImage(imgData1, 'JPEG', 0, 0, 210, 297);
+    try {
+      // Render Page 1
+      const canvas1 = await html2canvas(page1Element, canvasOptions);
+      const imgData1 = canvas1.toDataURL('image/jpeg', 0.95);
+      pdf.addImage(imgData1, 'JPEG', 0, 0, 210, 297);
 
-    // Render Page 2
-    if (page2Element) {
-      const canvas2 = await html2canvas(page2Element, canvasOptions);
-      const imgData2 = canvas2.toDataURL('image/jpeg', 0.95);
-      pdf.addPage();
-      pdf.addImage(imgData2, 'JPEG', 0, 0, 210, 297);
+      // Render Page 2
+      if (page2Element) {
+        const canvas2 = await html2canvas(page2Element, canvasOptions);
+        const imgData2 = canvas2.toDataURL('image/jpeg', 0.95);
+        pdf.addPage();
+        pdf.addImage(imgData2, 'JPEG', 0, 0, 210, 297);
+      }
+    } finally {
+      // Restaurar estilos originales en ambos elementos
+      page1Element.style.width = originalWidth1;
+      page1Element.style.maxWidth = originalMaxWidth1;
+      if (page2Element) {
+        page2Element.style.width = originalWidth2;
+        page2Element.style.maxWidth = originalMaxWidth2;
+      }
     }
 
     const outName = filename || `Preoperacional_${new Date().toISOString().slice(0, 10)}.pdf`;

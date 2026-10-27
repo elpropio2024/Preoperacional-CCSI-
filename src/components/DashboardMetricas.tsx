@@ -67,34 +67,129 @@ export default function DashboardMetricas() {
     cargarDatosDespacho();
   }, [fechaConsulta]);
 
-  // Formateador seguro de hora con dayjs para campos TIMESTAMPTZ
-  const formatHoraSalida = (timestamp?: string | null): string => {
-    if (!timestamp) return '---';
-    try {
-      const d = dayjs(timestamp);
-      if (!d.isValid()) return String(timestamp);
-      return d.format('hh:mm A');
-    } catch {
-      return String(timestamp);
+  // Formateador seguro de hora forzando zona horaria de Colombia y formato 12 horas
+  const formatearHoraLocal = (fechaString: string) => {
+    if (!fechaString) return '--:--';
+    const date = new Date(fechaString);
+    if (isNaN(date.getTime())) {
+      const fallbackDate = new Date(`1970-01-01T${fechaString}`);
+      if (!isNaN(fallbackDate.getTime())) {
+        return fallbackDate.toLocaleTimeString('en-US', {
+          timeZone: 'America/Bogota',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true
+        });
+      }
+      return String(fechaString);
     }
+
+    // Forzar zona horaria de Colombia y formato 12 horas
+    return date.toLocaleTimeString('en-US', {
+      timeZone: 'America/Bogota',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
   };
 
-  // Filtrado de la tabla principal por TC, Placa, Nombre, Cédula o Ruta
+  // Utilidad para extraer la fecha local exacta (YYYY-MM-DD) forzando la zona horaria de Colombia
+  const obtenerFechaLocal = (fechaString: string) => {
+    if (!fechaString) return '';
+    const date = new Date(fechaString);
+    if (isNaN(date.getTime())) {
+      if (/^\d{4}-\d{2}-\d{2}/.test(String(fechaString))) {
+        return String(fechaString).slice(0, 10);
+      }
+      return '';
+    }
+    // 'en-CA' formatea la fecha nativamente como YYYY-MM-DD
+    return date.toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+  };
+
+  // Filtrado de la tabla principal por TC, Placa, Operador o Ruta con soporte para datos directos y anidados, asegurando coincidencia estricta de fecha YYYY-MM-DD en hora Colombia
   const filteredRegistros = useMemo(() => {
-    if (!metricasData.registros) return [];
-    if (!searchTerm.trim()) return metricasData.registros;
+    if (!metricasData?.registros) return [];
+
+    const fechaSeleccionada = (fechaConsulta || '').trim().slice(0, 10);
+
+    // 1. Filtrar asegurando coincidencia de fecha en zona horaria de Colombia
+    const registrosPorFecha = fechaSeleccionada
+      ? metricasData.registros.filter((item: any) => {
+          const rawDate = item.created_at ?? item.fecha_registro ?? item.fecha ?? item.fecha_creacion ?? '';
+          const cumpleFecha = obtenerFechaLocal(rawDate) === fechaSeleccionada;
+          return cumpleFecha;
+        })
+      : metricasData.registros;
+
+    // 2. Si no hay término de búsqueda, retornar los registros de la fecha
+    if (!searchTerm?.trim()) return registrosPorFecha;
 
     const term = searchTerm.toLowerCase().trim();
-    return metricasData.registros.filter((reg: RelacionDespacho) => {
-      const tc = String(reg.tc || reg.movil || reg.numero_bus || reg.vehiculo_id || '').toLowerCase();
-      const placa = String(reg.placa || reg.vehiculo_placa || '').toLowerCase();
-      const nombre = String(reg.operador_nombre || reg.nombres_apellidos || reg.nombre || '').toLowerCase();
-      const cedula = String(reg.operador_cedula || reg.identificacion || reg.cedula || reg.operador_id || '').toLowerCase();
-      const ruta = String(reg.nombre_ruta || reg.ruta_asignada || reg.nume_ruta || '').toLowerCase();
 
-      return tc.includes(term) || placa.includes(term) || nombre.includes(term) || cedula.includes(term) || ruta.includes(term);
+    return registrosPorFecha.filter((item: any) => {
+      // 1. Obtener TC (validando anidación vehiculos?.tc o campos directos)
+      const tc = (
+        item.vehiculos?.tc ??
+        item.tc ??
+        item.movil ??
+        item.numero_bus ??
+        item.vehiculo_tc ??
+        item.vehiculo_id ??
+        ''
+      ).toString().toLowerCase();
+
+      // 2. Obtener Placa (validando anidación vehiculos?.placa o campos directos)
+      const placa = (
+        item.vehiculos?.placa ??
+        item.placa ??
+        item.vehiculo_placa ??
+        ''
+      ).toString().toLowerCase();
+
+      // 3. Obtener Operador: Nombre y Cédula (validando anidación operadores?.nombres_apellidos o campos directos)
+      const nombreOperador = (
+        item.operadores?.nombres_apellidos ??
+        item.operadores?.nombre ??
+        item.operador_nombre ??
+        item.nombres_apellidos ??
+        item.nombre ??
+        item.conductor_nombre ??
+        ''
+      ).toString().toLowerCase();
+
+      const cedulaOperador = (
+        item.operadores?.identificacion ??
+        item.operadores?.cedula ??
+        item.operador_cedula ??
+        item.identificacion ??
+        item.conductor_cedula ??
+        item.cedula ??
+        item.operador_id ??
+        ''
+      ).toString().toLowerCase();
+
+      // 4. Obtener Ruta (validando anidación rutas?.nume_ruta o campos directos)
+      const ruta = (
+        item.rutas?.nume_ruta ??
+        item.rutas?.nombre_ruta ??
+        item.nombre_ruta ??
+        item.ruta_asignada ??
+        item.nume_ruta ??
+        item.ruta ??
+        ''
+      ).toString().toLowerCase();
+
+      // Coincidencia con cualquiera de los campos buscados
+      return (
+        tc.includes(term) ||
+        placa.includes(term) ||
+        nombreOperador.includes(term) ||
+        cedulaOperador.includes(term) ||
+        ruta.includes(term)
+      );
     });
-  }, [metricasData.registros, searchTerm]);
+  }, [metricasData?.registros, searchTerm, fechaConsulta]);
 
   return (
     <div 
@@ -135,8 +230,17 @@ export default function DashboardMetricas() {
 
           <input 
             type="date"
+            max={new Date().toISOString().split('T')[0]}
             value={fechaConsulta}
-            onChange={(e) => setFechaConsulta(e.target.value)}
+            onChange={(e) => {
+              const val = e.target.value;
+              const maxDate = new Date().toISOString().split('T')[0];
+              if (val && val > maxDate) {
+                setFechaConsulta(maxDate);
+              } else {
+                setFechaConsulta(val);
+              }
+            }}
             className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-all outline-none cursor-pointer ${
               isLight 
                 ? 'bg-white text-slate-800 border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100' 
@@ -279,7 +383,7 @@ export default function DashboardMetricas() {
                       {idx + 1}
                     </span>
                     <span className="font-mono font-bold text-sm text-blue-600 dark:text-blue-400">
-                      TC-{vehiculo.tc}
+                      {vehiculo.tc}
                     </span>
                   </div>
 
@@ -465,14 +569,57 @@ export default function DashboardMetricas() {
                   ? 'divide-slate-200/60 bg-white' 
                   : 'divide-slate-800/60 bg-slate-900/40 dark:divide-slate-800/60 dark:bg-slate-900/40'
               }`}>
-                {filteredRegistros.map((item: RelacionDespacho, idx: number) => {
-                  const tc = item.tc || item.movil || item.numero_bus || item.vehiculo_id || 'N/D';
-                  const placa = item.placa || item.vehiculo_placa || 'N/D';
-                  const nombre = item.operador_nombre || item.nombres_apellidos || item.nombre || 'Operador Registrado';
-                  const cedula = item.operador_cedula || item.identificacion || item.cedula || item.operador_id || 'N/D';
-                  const rutaVisual = item.nombre_ruta || item.ruta_asignada || item.nume_ruta || item.ruta || 'X101';
-                  const rawHora = item.hora_registro || item.hora_salida || item.created_at || item.fecha_registro || item.fecha;
-                  const horaFormatted = formatHoraSalida(rawHora);
+                {filteredRegistros.map((item: any, idx: number) => {
+                  const tc = (
+                    item.vehiculos?.tc ??
+                    item.tc ??
+                    item.movil ??
+                    item.numero_bus ??
+                    item.vehiculo_tc ??
+                    item.vehiculo_id ??
+                    'N/D'
+                  ).toString();
+
+                  const placa = (
+                    item.vehiculos?.placa ??
+                    item.placa ??
+                    item.vehiculo_placa ??
+                    'N/D'
+                  ).toString();
+
+                  const nombre = (
+                    item.operadores?.nombres_apellidos ??
+                    item.operadores?.nombre ??
+                    item.operador_nombre ??
+                    item.nombres_apellidos ??
+                    item.nombre ??
+                    item.conductor_nombre ??
+                    'Operador Registrado'
+                  ).toString();
+
+                  const cedula = (
+                    item.operadores?.identificacion ??
+                    item.operadores?.cedula ??
+                    item.operador_cedula ??
+                    item.identificacion ??
+                    item.conductor_cedula ??
+                    item.cedula ??
+                    item.operador_id ??
+                    'N/D'
+                  ).toString();
+
+                  const rutaVisual = (
+                    item.rutas?.nume_ruta ??
+                    item.rutas?.nombre_ruta ??
+                    item.nombre_ruta ??
+                    item.ruta_asignada ??
+                    item.nume_ruta ??
+                    item.ruta ??
+                    'X101'
+                  ).toString();
+
+                  const rawHora = item.created_at ?? item.fecha_registro ?? item.hora_salida ?? item.hora_registro ?? item.fecha;
+                  const horaFormatted = formatearHoraLocal(rawHora);
                   const revisiones = item.revisiones ?? item.cantidad_revisiones ?? 1;
 
                   return (
@@ -488,7 +635,7 @@ export default function DashboardMetricas() {
                       <td className="py-2.5 px-3.5 font-mono font-bold text-xs text-blue-600 dark:text-blue-400">
                         <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-blue-500/10 border border-blue-500/20">
                           <Bus className="w-3 h-3" />
-                          TC-{tc}
+                          {tc}
                         </span>
                       </td>
 
@@ -526,12 +673,12 @@ export default function DashboardMetricas() {
                         </span>
                       </td>
 
-                      {/* Hora Salida (Formateada con dayjs) */}
+                      {/* Hora Salida (Forzando zona horaria Colombia America/Bogota) */}
                       <td className="py-2.5 px-3.5">
                         <span className="inline-flex items-center gap-1.5 font-mono font-bold text-xs">
                           <Clock className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
                           <span className={isLight ? 'text-slate-800' : 'text-slate-200 dark:text-slate-200'}>
-                            {horaFormatted}
+                            {formatearHoraLocal(item.created_at ?? item.hora_salida ?? item.fecha_registro ?? item.hora_registro ?? item.fecha)}
                           </span>
                         </span>
                       </td>

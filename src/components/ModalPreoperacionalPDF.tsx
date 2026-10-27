@@ -3,6 +3,7 @@ import { Download, X, Loader2, FileText } from 'lucide-react';
 import { PreoperacionalData, LISTA_CRITERIOS, getCriterioValue, generarPreoperacionalPDF, CriterioItem } from '../utils/exportPreoperacionalPDF';
 import { supabase } from '../lib/apiClients';
 import logoCcsi from '../assets/logo-ccsi.jpg';
+import { LOGO_CCSI_BASE64 } from '../assets/logoBase64';
 
 interface ModalPreoperacionalPDFProps {
   data: PreoperacionalData;
@@ -13,21 +14,14 @@ interface ModalPreoperacionalPDFProps {
 // Componente del Logo Institucional CCSI de Alta Fidelidad
 const LogoCCSI = ({ logoSrc }: { logoSrc?: string }) => (
   <div className="flex items-center gap-2">
-    <div className="w-14 h-14 rounded-lg bg-white flex items-center justify-center p-1 shadow-sm border border-slate-200/80 shrink-0 overflow-hidden">
+    <div className="w-14 h-14 rounded-lg bg-white flex items-center justify-center p-0.5 shadow-sm border border-slate-200/80 shrink-0 overflow-hidden">
       <img
-        src={logoSrc || logoCcsi}
+        src={logoSrc || LOGO_CCSI_BASE64}
         alt="CCSI - Cartagena Complementaria y Social"
         className="w-full h-full object-contain block"
         crossOrigin="anonymous"
         referrerPolicy="no-referrer"
         loading="eager"
-        onError={(e) => {
-          // Si falla la carga por algún motivo, fallback a URL relativa directa
-          const target = e.currentTarget;
-          if (target.src !== '/logo-ccsi.jpg') {
-            target.src = '/logo-ccsi.jpg';
-          }
-        }}
       />
     </div>
   </div>
@@ -78,33 +72,16 @@ export default function ModalPreoperacionalPDF({ data, isOpen, onClose }: ModalP
   const [generando, setGenerando] = useState(false);
   const [cedulaAsync, setCedulaAsync] = useState<string | null>(null);
   const [tipoVehiculoAsync, setTipoVehiculoAsync] = useState<string | null>(null);
-  const [logoBase64, setLogoBase64] = useState<string>(logoCcsi);
+  const [logoBase64, setLogoBase64] = useState<string>(LOGO_CCSI_BASE64);
   const page1Ref = useRef<HTMLDivElement>(null);
   const page2Ref = useRef<HTMLDivElement>(null);
 
-  // Pre-cargar y convertir el logo a Base64 para garantizar que html2canvas lo capture siempre
+  // El logo ya viene pre-cargado en Base64 instantáneo para html2canvas
   useEffect(() => {
-    let isMounted = true;
-    const convertLogoToBase64 = async () => {
-      try {
-        const response = await fetch(logoCcsi);
-        const blob = await response.blob();
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          if (isMounted && typeof reader.result === 'string') {
-            setLogoBase64(reader.result);
-          }
-        };
-        reader.readAsDataURL(blob);
-      } catch (err) {
-        console.warn('Fallback a URL directa de logo:', err);
-      }
-    };
-    convertLogoToBase64();
-    return () => {
-      isMounted = false;
-    };
-  }, []);
+    if (!logoBase64) {
+      setLogoBase64(LOGO_CCSI_BASE64);
+    }
+  }, [logoBase64]);
 
   // Extraer cédula de múltiples alias posibles
   const rawCedula = 

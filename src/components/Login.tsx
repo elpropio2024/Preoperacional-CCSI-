@@ -22,7 +22,7 @@ import { supabase } from '../lib/apiClients';
 
 // Session type for backward compatibility in state-based rendering
 export interface LoginSession {
-  type: 'operator' | 'admin' | 'jefe_patio' | 'regulador' | 'mantenimiento';
+  type: 'operator' | 'admin' | 'jefe_patio' | 'regulador' | 'mantenimiento' | string;
   user: {
     id: string;
     email?: string;
@@ -228,53 +228,54 @@ export default function Login({ onLoginSuccess }: LoginProps) {
     }
 
     try {
-      // 1. INTENTO EN LA TABLA OPERADORES
+      // Paso 1 (Conductores): Consulta la tabla operadores (.eq('identificacion', cedula))
       const { data: operador, error: errorOperador } = await supabase
         .from('operadores')
         .select('*')
         .eq('identificacion', inputId)
-        .maybeSingle(); // .maybeSingle() evita que lance error si no encuentra nada
+        .maybeSingle();
 
       if (errorOperador) {
-        console.error("Error buscando en operadores:", errorOperador);
+        console.warn("Aviso al consultar operadores:", errorOperador);
       }
 
-      // Si se encontró en operadores, validamos contraseña aquí mismo
+      // Si existe en operadores, valida credenciales e inicia sesión redirigiendo a la planilla preoperacional
       if (operador) {
-        const storedHash = operador['password-hash'] || operador.password_hash || operador.identificacion;
-        const isPasswordValid = await verifyPassword(inputPass, storedHash) || (inputId === inputPass);
-        
-        if (isPasswordValid) {
-          const sessionUser = {
-            id: operador.id,
-            identificacion: operador.identificacion,
-            nombres_apellidos: operador.nombres_apellidos,
-            nombre: operador.nombres_apellidos,
-            cargo: operador.cargo || 'Operador de Patio',
-            cedula: operador.identificacion
-          };
+        const storedPass = operador.password || operador.contrasena || operador.password_hash || operador['password-hash'] || operador.identificacion;
+        const isPasswordValid = (inputPass === String(storedPass)) || (await verifyPassword(inputPass, storedPass)) || (inputId === inputPass);
 
-          // Guardar credencial en espejo para uso offline
-          await registerOfflineMirror(inputId, operador.id, operador.nombres_apellidos, operador.cargo || 'Operador de Patio', storedHash);
-
-          sessionStorage.setItem('horaInicioPreoperacional', new Date().toISOString());
-          setSuccessMessage(`¡Bienvenido, ${sessionUser.nombres_apellidos}! Inicializando planilla móvil...`);
-          setTimeout(() => {
-            redirectUser('/planilla', {
-              type: 'operator',
-              user: sessionUser
-            });
-          }, 1200);
-          return; // Detiene la ejecución aquí porque ya entró
-        } else {
+        if (!isPasswordValid) {
           setErrorMessage("Cédula o contraseña incorrectas");
+          setIsLoading(false);
           return;
         }
+
+        const sessionUser = {
+          id: operador.id,
+          identificacion: operador.identificacion,
+          nombres_apellidos: operador.nombres_apellidos,
+          nombre: operador.nombres_apellidos,
+          cargo: operador.cargo || 'Operador de Patio',
+          cedula: operador.identificacion,
+          rol: 'operador'
+        };
+
+        // Guardar credencial en espejo para uso offline
+        await registerOfflineMirror(inputId, operador.id, operador.nombres_apellidos, operador.cargo || 'Operador de Patio', storedPass);
+
+        sessionStorage.setItem('horaInicioPreoperacional', new Date().toISOString());
+        setSuccessMessage(`¡Bienvenido, ${sessionUser.nombres_apellidos}! Inicializando planilla móvil...`);
+
+        setTimeout(() => {
+          redirectUser('/planilla', {
+            type: 'operator',
+            user: sessionUser
+          });
+        }, 1000);
+        return;
       }
 
-      // 2. FALLBACK: SI NO SE ENCONTRÓ EN OPERADORES, BUSCAMOS EN USUARIOS
-      console.log("No se encontró en operadores, buscando en tabla usuarios...");
-      
+      // Paso 2 (Staff / Usuarios): Si no existe en operadores, consulta la tabla usuarios (.eq('identificacion', cedula))
       const { data: usuario, error: errorUsuario } = await supabase
         .from('usuarios')
         .select('*')
@@ -282,102 +283,86 @@ export default function Login({ onLoginSuccess }: LoginProps) {
         .maybeSingle();
 
       if (errorUsuario) {
-        console.error("Error buscando en usuarios:", errorUsuario);
+        console.warn("Aviso al consultar usuarios:", errorUsuario);
       }
 
-      // Si se encontró en usuarios, validamos contraseña y segmentamos rol
-      if (usuario) {
-        // Imprimir en consola para ver qué datos están llegando de la base de datos
-        console.log("=== DEPURACIÓN DE USUARIO OPERATIVO ===");
-        console.log("Identificación encontrada:", usuario.identificacion);
-        console.log("Rol crudo en la BD:", usuario.rol);
-        console.log("Hash en la BD:", usuario['password-hash']);
+      if (!usuario) {
+        setErrorMessage("Cédula o contraseña incorrectas");
+        setIsLoading(false);
+        return;
+      }
 
-        const storedHash = usuario['password-hash'] || usuario.password_hash || usuario.identificacion;
-        const isPasswordValid = await verifyPassword(inputPass, storedHash) || (inputId === inputPass);
-        console.log("¿La contraseña coincide?", isPasswordValid);
+      // Validar coincidencia exacta de contraseña
+      const storedPass = usuario.password || usuario.contrasena || usuario.password_hash || usuario['password-hash'] || usuario.identificacion;
+      const isPasswordValid = (inputPass === String(storedPass)) || (await verifyPassword(inputPass, storedPass)) || (inputId === inputPass);
 
-        if (isPasswordValid) {
-          const completeName = usuario.nombres_apellidos || 'Operativo Oficina';
-          const rolCrudo = usuario.rol?.toString().trim() || '';
-          const rolNormalizado = rolCrudo.toLowerCase().replace('-', '_');
+      if (!isPasswordValid) {
+        setErrorMessage("Cédula o contraseña incorrectas");
+        setIsLoading(false);
+        return;
+      }
 
-          // Normalized representation for routing checking
-          let mappedRol = usuario.rol;
-          let sessionType: 'operator' | 'jefe_patio' | 'regulador' = 'operator';
+      // Paso 3 (Enrutador por Rol): Si existe en usuarios y data.activo === true
+      if (usuario.activo !== true) {
+        setErrorMessage("Usuario inactivo en el sistema. Contacte al administrador.");
+        setIsLoading(false);
+        return;
+      }
 
-          if (rolCrudo === 'Operador' || rolNormalizado === 'operador' || rolNormalizado === 'operador_patio') {
-            mappedRol = 'operador';
-            sessionType = 'operator';
-          } else if (rolCrudo === 'Jefe de Patio' || rolNormalizado === 'jefe_patio' || rolNormalizado === 'jefepatio' || rolNormalizado === 'jefe') {
-            mappedRol = 'jefe_patio';
-            sessionType = 'jefe_patio';
-          } else if (rolCrudo === 'Regulador' || rolNormalizado === 'regulador' || rolNormalizado === 'regulacion') {
-            mappedRol = 'regulador';
-            sessionType = 'regulador';
-          } else {
-            console.warn("Acceso denegado: El rol no pertenece a Jefe de Patio, Regulador ni Operador.");
-            setErrorMessage("Acceso no autorizado para este panel");
-            return;
-          }
+      const completeName = usuario.nombres_apellidos || usuario.nombre || 'Personal Staff';
+      const sessionUser = {
+        id: usuario.id,
+        identificacion: usuario.identificacion,
+        nombres_apellidos: completeName,
+        nombre: completeName,
+        rol: usuario.rol,
+        cargo: usuario.cargo || usuario.rol
+      };
 
-          const sessionUser = {
-            id: usuario.id,
-            identificacion: usuario.identificacion,
-            nombres_apellidos: completeName,
-            nombre: completeName,
-            rol: mappedRol,
-            cargo: usuario.cargo || (sessionType === 'jefe_patio' ? 'Jefe de Patio' : sessionType === 'regulador' ? 'Regulador' : 'Operador de Patio')
-          };
+      const sessionObj: LoginSession = {
+        type: (usuario.rol?.toString().toLowerCase().replace(/\s+/g, '_') as any) || 'operator',
+        user: sessionUser
+      };
 
-          const exactSessionObj: LoginSession = {
-            type: sessionType,
-            user: sessionUser
-          };
+      if (onLoginSuccess) {
+        onLoginSuccess(sessionObj);
+      }
 
-          // Si el rol es Operador de Patio (Conductor)
-          if (sessionType === 'operator') {
-            console.log("Redirección exitosa -> /planilla");
-            // Guardar credencial en espejo para uso offline
-            await registerOfflineMirror(inputId, usuario.id, completeName, usuario.cargo || 'Operador de Patio', storedHash);
+      setSuccessMessage(`¡Bienvenido, ${completeName}!`);
 
-            sessionStorage.setItem('horaInicioPreoperacional', new Date().toISOString());
-            setSuccessMessage(`¡Bienvenido, ${completeName}! Inicializando planilla móvil...`);
-            setTimeout(() => {
-              redirectUser('/planilla', exactSessionObj);
-            }, 1200);
-            return; // Detiene la ejecución aquí
-          }
+      // Evaluar data.rol para redirigir a la ruta correcta
+      const rolEvaluado = usuario.rol?.toString().trim().toLowerCase();
 
-          // Si el rol es Jefe de Patio
-          if (sessionType === 'jefe_patio') {
-            console.log("Redirección exitosa -> /dashboard-jefe");
-            setSuccessMessage(`¡Autenticado, Jefe de Patio ${completeName}! Abriendo Panel Vial.`);
-            setTimeout(() => {
-              redirectUser('/dashboard-jefe', exactSessionObj);
-            }, 1200);
-            return; // Congela la ejecución aquí
-          }
+      switch (rolEvaluado) {
+        case 'auxiliar vial':
+        case 'auxiliar_vial':
+          // Redirige o renderiza la VistaAuxiliarVial
+          navigate('/auxiliar-vial');
+          break;
 
-          // Si el rol es Regulador
-          if (sessionType === 'regulador') {
-            console.log("Redirección exitosa -> /dashboard-regulador");
-            setSuccessMessage(`¡Autenticado, Regulador ${completeName}! Abriendo Panel de Despachos.`);
-            setTimeout(() => {
-              redirectUser('/dashboard-regulador', exactSessionObj);
-            }, 1200);
-            return; // Congela la ejecución aquí
-          }
+        case 'jefe de patio':
+        case 'jefe_patio':
+        case 'jefepatio':
+        case 'jefe':
+          navigate('/dashboard-jefe');
+          break;
 
-        } else {
-          console.warn("Contraseña incorrecta para la identificación proporcionada.");
-          setErrorMessage("Cédula o contraseña incorrectas");
+        case 'regulador':
+        case 'regulacion':
+          navigate('/dashboard-regulador');
+          break;
+
+        // Agrega un case genérico para que yo pueda añadir mis otros roles:
+        case 'ejemplo_otro_rol':
+          navigate('/otra-vista');
+          break;
+
+        default:
+          // Mostrar alerta: "Su rol no tiene una vista asignada en este portal."
+          setErrorMessage("Su rol no tiene una vista asignada en este portal.");
+          setIsLoading(false);
           return;
-        }
       }
-
-      // 3. ERROR FINAL: SI NO ENTRÓ EN NINGUNO DE LOS BLOQUES ANTERIORES
-      setErrorMessage("Cédula o contraseña incorrectas");
 
     } catch (error) {
       console.error("Error crítico en el flujo de login:", error);
